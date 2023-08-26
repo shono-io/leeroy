@@ -7,10 +7,23 @@ import (
 	"fmt"
 	"github.com/benthosdev/benthos/v4/public/service"
 	"github.com/elastic/go-elasticsearch/v8"
-	"github.com/elastic/go-elasticsearch/v8/typedapi/eql/search"
+	"github.com/elastic/go-elasticsearch/v8/typedapi/core/search"
+	"github.com/elastic/go-elasticsearch/v8/typedapi/types"
 	"github.com/elastic/go-elasticsearch/v8/typedapi/types/enums/optype"
 	"github.com/elastic/go-elasticsearch/v8/typedapi/types/enums/refresh"
+	"github.com/elastic/go-elasticsearch/v8/typedapi/types/enums/sortorder"
+	"io"
 )
+
+func IsElasticsearchConfigured(conf *service.ParsedConfig) bool {
+	_, err := conf.FieldStringList("elasticsearch", "addresses")
+	hasAddresses := err == nil
+
+	_, err = conf.FieldString("elasticsearch", "cloud_id")
+	hasCloudId := err == nil
+
+	return hasAddresses || hasCloudId
+}
 
 func NewElasticsearchClientFromConfig(conf *service.ParsedConfig) (Client, error) {
 	cfg, err := clientConfigFromConfig(conf)
@@ -101,7 +114,31 @@ type ElasticsearchClient struct {
 }
 
 func (c *ElasticsearchClient) List(ctx context.Context, collection string, q string, paging *PagingOpts) (Cursor, error) {
-	panic("not implemented yet")
+	resp, err := c.cl.OpenPointInTime(collection).KeepAlive("1m").Do(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	pit := &types.PointInTimeReference{
+		Id:        resp.Id,
+		KeepAlive: "1m",
+	}
+
+	qry := types.NewQuery()
+	qry.QueryString = &types.QueryStringQuery{Query: q}
+
+	sort := types.NewSortOptions()
+	sort.Doc_ = &types.ScoreSort{Order: &sortorder.Asc}
+
+	req := c.cl.Search().Query(qry).Pit(pit).Sort(sort).Size(100)
+	r, _ := req.HttpRequest(ctx)
+	if r != nil {
+		defer r.Body.Close()
+		b, _ := io.ReadAll(r.Body)
+		fmt.Println(string(b))
+	}
+
+	return newEsCursor(ctx, c.cl, req, pit)
 }
 
 func (c *ElasticsearchClient) Get(ctx context.Context, collection string, key string) (map[string]any, error) {
@@ -136,6 +173,15 @@ func (c *ElasticsearchClient) Set(ctx context.Context, collection string, key st
 }
 
 func (c *ElasticsearchClient) Merge(ctx context.Context, collection string, key string, value map[string]any) (map[string]any, error) {
+	_, hasDoc := value["doc"]
+	_, hasScript := value["script"]
+
+	if !hasDoc && !hasScript {
+		value = map[string]any{
+			"doc": value,
+		}
+	}
+
 	b, err := json.Marshal(value)
 	if err != nil {
 		return nil, err
@@ -147,7 +193,7 @@ func (c *ElasticsearchClient) Merge(ctx context.Context, collection string, key 
 	}
 
 	if fnd {
-		_, err = c.cl.Update(collection, key).
+		_, err := c.cl.Update(collection, key).
 			Raw(bytes.NewBuffer(b)).
 			Refresh(refresh.True).
 			Do(ctx)
@@ -195,21 +241,87 @@ func (c *ElasticsearchClient) Close() error {
 	return nil
 }
 
+func newEsCursor(ctx context.Context, cl *elasticsearch.TypedClient, req *search.Search, pit *types.PointInTimeReference) (*elasticsearchCursor, error) {
+	c := &elasticsearchCursor{
+		ctx:        ctx,
+		cl:         cl,
+		req:        req,
+		pit:        pit,
+		pageOffset: 0,
+	}
+
+	searchResp, err := req.Do(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	c.hits = searchResp.Hits.Hits
+
+	return c, nil
+}
+
 type elasticsearchCursor struct {
-	response *search.Response
+	ctx context.Context
+	cl  *elasticsearch.TypedClient
+	pit *types.PointInTimeReference
+
+	// -- the offset within the current batch, reset to 0 when a new batch is fetched
+	pageOffset int64
+
+	// -- the current batch of results
+	hits []types.Hit
+
+	req      *search.Search
+	lastSort []types.FieldValue
 }
 
 func (c *elasticsearchCursor) HasNext() bool {
-	//TODO implement me
-	panic("implement me")
+	return len(c.hits) > 0
 }
 
 func (c *elasticsearchCursor) Read() (map[string]any, error) {
-	//TODO implement me
-	panic("implement me")
+	hit := c.hits[c.pageOffset]
+
+	var result map[string]any
+	if err := json.Unmarshal(hit.Source_, &result); err != nil {
+		return nil, err
+	}
+
+	c.lastSort = hit.Sort
+	c.pageOffset++
+
+	if c.pageOffset >= int64(len(c.hits)) {
+		if err := c.loadMore(); err != nil {
+			return nil, err
+		}
+	}
+
+	return result, nil
 }
 
 func (c *elasticsearchCursor) Close() error {
-	//TODO implement me
-	panic("implement me")
+	_, err := c.cl.ClosePointInTime().Id(c.pit.Id).Do(c.ctx)
+	return err
+}
+
+func (c *elasticsearchCursor) loadMore() error {
+	fmt.Println("loading more results from elasticsearch")
+
+	req := c.req.SearchAfter(c.lastSort...)
+	r, _ := req.HttpRequest(c.ctx)
+	if r != nil {
+		defer r.Body.Close()
+		b, _ := io.ReadAll(r.Body)
+		fmt.Println(string(b))
+	}
+
+	resp, err := req.Do(c.ctx)
+	if err != nil {
+		return err
+	}
+
+	c.hits = resp.Hits.Hits
+	c.pageOffset = 0
+
+	return nil
 }

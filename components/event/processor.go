@@ -20,7 +20,7 @@ func init() {
 
 func config() *service.ConfigSpec {
 	return service.NewConfigSpec().
-		Field(service.NewStringField("namespace").Default("")).
+		Field(service.NewStringField("namespace").Default("io.shono")).
 		Field(service.NewInterpolatedStringField("scope")).
 		Field(service.NewInterpolatedStringField("concept")).
 		Field(service.NewInterpolatedStringField("event"))

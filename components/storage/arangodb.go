@@ -8,6 +8,11 @@ import (
 	"github.com/benthosdev/benthos/v4/public/service"
 )
 
+func IsArangodbConfigured(conf *service.ParsedConfig) bool {
+	_, err := conf.FieldStringList("arangodb", "urls")
+	return err == nil
+}
+
 func ArangodbConfigFields() []*service.ConfigField {
 	return []*service.ConfigField{
 		service.NewStringListField("urls"),

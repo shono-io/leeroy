@@ -6,7 +6,7 @@ require (
 	github.com/arangodb/go-driver v1.6.0
 	github.com/benthosdev/benthos/v4 v4.20.0
 	github.com/dustin/go-humanize v1.0.1
-	github.com/elastic/go-elasticsearch/v8 v8.8.2
+	github.com/elastic/go-elasticsearch/v8 v8.9.0
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/r3labs/diff/v3 v3.0.1

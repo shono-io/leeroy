@@ -48,13 +48,13 @@ func procFromConfig(conf *service.ParsedConfig) (proc *storeProc, err error) {
 	}
 	proc.collection = collection
 
-	if conf.Contains("driver", "arangodb") {
+	if IsArangodbConfigured(conf.Namespace("driver")) {
 		driver, err := NewArangodbClientFromConfig(conf.Namespace("driver", "arangodb"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to create arangodb driver: %w", err)
 		}
 		proc.driver = driver
-	} else if conf.Contains("driver", "elasticsearch") {
+	} else if IsElasticsearchConfigured(conf.Namespace("driver")) {
 		driver, err := NewElasticsearchClientFromConfig(conf.Namespace("driver", "elasticsearch"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to create elasticsearch driver: %w", err)
@@ -103,6 +103,8 @@ func (s *storeProc) Process(ctx context.Context, message *service.Message) (serv
 		return s.processAdd(ctx, message)
 	case "set":
 		return s.processReplace(ctx, message)
+	case "merge":
+		return s.processMerge(ctx, message)
 	case "delete":
 		return s.processDelete(ctx, message)
 	case "list":
@@ -294,6 +296,11 @@ func (s *storeProc) processList(ctx context.Context, message *service.Message) (
 	if err != nil {
 		return nil, fmt.Errorf("failed to list documents: %w", err)
 	}
+	defer func() {
+		if err := cur.Close(); err != nil {
+			logrus.Warn("unable to close PIT: %w", err)
+		}
+	}()
 
 	var res []*service.Message
 	for cur.HasNext() {
