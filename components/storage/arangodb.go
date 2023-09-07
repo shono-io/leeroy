@@ -22,7 +22,7 @@ func ArangodbConfigFields() []*service.ConfigField {
 	}
 }
 
-func NewArangodbClientFromConfig(conf *service.ParsedConfig) (Client, error) {
+func NewArangodbClientFromConfig(conf *service.ParsedConfig, mgr *service.Resources) (Client, error) {
 	urls, err := conf.FieldStringList("urls")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get urls field: %w", err)
@@ -67,25 +67,42 @@ func NewArangodbClientFromConfig(conf *service.ParsedConfig) (Client, error) {
 		return nil, fmt.Errorf("failed to get arangodb database: %w", err)
 	}
 
-	return ArangodbClient{c, db}, nil
+	return ArangodbClient{c, db, mgr.Logger()}, nil
 }
 
 type ArangodbClient struct {
-	cl driver.Client
-	db driver.Database
+	cl     driver.Client
+	db     driver.Database
+	logger *service.Logger
+}
+
+func (c ArangodbClient) ParseQuery(config string) (any, error) {
+	return config, nil
 }
 
 func (c ArangodbClient) Merge(ctx context.Context, collection string, key string, value map[string]any) (map[string]any, error) {
 	panic("not supported yet")
 }
 
-func (c ArangodbClient) List(ctx context.Context, collection string, q string, paging *PagingOpts) (Cursor, error) {
-	q, err := c.buildQuery(collection, q, paging)
+func (c ArangodbClient) List(ctx context.Context, collection string, q any, paging *PagingOpts) (Cursor, error) {
+	if q == nil {
+		return nil, fmt.Errorf("query is nil")
+	}
+
+	var qry string
+	switch qt := q.(type) {
+	case string:
+		qry = qt
+	default:
+		return nil, fmt.Errorf("query is not a valid arangodb query")
+	}
+
+	query, err := c.buildQuery(collection, qry, paging)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build query: %w", err)
 	}
 
-	cursor, err := c.db.Query(ctx, q, map[string]interface{}{})
+	cursor, err := c.db.Query(ctx, query, map[string]interface{}{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}

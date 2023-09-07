@@ -23,7 +23,8 @@ func config() *service.ConfigSpec {
 		Field(service.NewStringField("namespace").Default("io.shono")).
 		Field(service.NewInterpolatedStringField("scope")).
 		Field(service.NewInterpolatedStringField("concept")).
-		Field(service.NewInterpolatedStringField("event"))
+		Field(service.NewInterpolatedStringField("event")).
+		Field(service.NewInterpolatedStringField("key"))
 }
 
 func newProcessor(conf *service.ParsedConfig, mgr *service.Resources) (service.Processor, error) {
@@ -51,11 +52,17 @@ func newProcessor(conf *service.ParsedConfig, mgr *service.Resources) (service.P
 		return nil, err
 	}
 
+	key, err := conf.FieldInterpolatedString("key")
+	if err != nil {
+		return nil, err
+	}
+
 	return &proc{
 		namespace:   namespace,
 		scopeExpr:   scope,
 		conceptExpr: concept,
 		eventExpr:   event,
+		keyExpr:     key,
 	}, nil
 }
 
@@ -64,6 +71,7 @@ type proc struct {
 	scopeExpr   *service.InterpolatedString
 	conceptExpr *service.InterpolatedString
 	eventExpr   *service.InterpolatedString
+	keyExpr     *service.InterpolatedString
 }
 
 func (p *proc) Process(ctx context.Context, message *service.Message) (service.MessageBatch, error) {
@@ -88,6 +96,12 @@ func (p *proc) Process(ctx context.Context, message *service.Message) (service.M
 		return nil, fmt.Errorf("failed to parse event: %w", err)
 	}
 	result.MetaSetMut(p.namespace+"event", event)
+
+	key, err := p.keyExpr.TryString(message)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse key: %w", err)
+	}
+	result.MetaSetMut(p.namespace+"key", key)
 
 	return []*service.Message{result}, nil
 }

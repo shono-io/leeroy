@@ -10,7 +10,7 @@ import (
 
 func init() {
 	err := service.RegisterProcessor("storage", storeProcConfig(), func(conf *service.ParsedConfig, mgr *service.Resources) (service.Processor, error) {
-		return procFromConfig(conf)
+		return procFromConfig(conf, mgr)
 	})
 	if err != nil {
 		panic(err)
@@ -39,7 +39,7 @@ func storeProcConfig() *service.ConfigSpec {
 			Optional())
 }
 
-func procFromConfig(conf *service.ParsedConfig) (proc *storeProc, err error) {
+func procFromConfig(conf *service.ParsedConfig, mgr *service.Resources) (proc *storeProc, err error) {
 	proc = &storeProc{}
 
 	collection, err := conf.FieldInterpolatedString("collection")
@@ -49,13 +49,13 @@ func procFromConfig(conf *service.ParsedConfig) (proc *storeProc, err error) {
 	proc.collection = collection
 
 	if IsArangodbConfigured(conf.Namespace("driver")) {
-		driver, err := NewArangodbClientFromConfig(conf.Namespace("driver", "arangodb"))
+		driver, err := NewArangodbClientFromConfig(conf.Namespace("driver", "arangodb"), mgr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create arangodb driver: %w", err)
 		}
 		proc.driver = driver
 	} else if IsElasticsearchConfigured(conf.Namespace("driver")) {
-		driver, err := NewElasticsearchClientFromConfig(conf.Namespace("driver", "elasticsearch"))
+		driver, err := NewElasticsearchClientFromConfig(conf.Namespace("driver", "elasticsearch"), mgr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create elasticsearch driver: %w", err)
 		}
@@ -287,12 +287,17 @@ func (s *storeProc) processList(ctx context.Context, message *service.Message) (
 		return nil, fmt.Errorf("failed to parse query: %w", err)
 	}
 
+	qry, err := s.driver.ParseQuery(q)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse query: %w", err)
+	}
+
 	col, err := s.collection.TryString(message)
 	if err != nil {
 		return nil, fmt.Errorf("invalid collection: %w", err)
 	}
 
-	cur, err := s.driver.List(ctx, col, q, nil)
+	cur, err := s.driver.List(ctx, col, qry, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list documents: %w", err)
 	}
@@ -302,22 +307,22 @@ func (s *storeProc) processList(ctx context.Context, message *service.Message) (
 		}
 	}()
 
-	var res []*service.Message
+	docs := []any{}
 	for cur.HasNext() {
 		doc, err := cur.Read()
 		if err != nil {
 			return nil, fmt.Errorf("failed to read document: %w", err)
 		}
 
-		result := service.NewMessage(nil)
-		result.SetStructured(doc)
-
-		CopyMeta(message, result)
-
-		res = append(res, result)
+		docs = append(docs, doc)
 	}
 
-	return res, nil
+	result := service.NewMessage(nil)
+	result.SetStructured(docs)
+
+	CopyMeta(message, result)
+
+	return service.MessageBatch{result}, nil
 }
 
 func (s *storeProc) getMessagePayload(message *service.Message) (map[string]any, error) {

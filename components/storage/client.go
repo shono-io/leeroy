@@ -3,7 +3,8 @@ package storage
 import "context"
 
 type Client interface {
-	List(ctx context.Context, collection string, q string, paging *PagingOpts) (Cursor, error)
+	ParseQuery(config string) (any, error)
+	List(ctx context.Context, collection string, q any, paging *PagingOpts) (Cursor, error)
 	Get(ctx context.Context, collection string, key string) (map[string]any, error)
 	Set(ctx context.Context, collection string, key string, value map[string]any) error
 	Merge(ctx context.Context, collection string, key string, value map[string]any) (map[string]any, error)
@@ -21,4 +22,8 @@ type Cursor interface {
 	HasNext() bool
 	Read() (map[string]any, error)
 	Close() error
+}
+
+type Query interface {
+	Parse(config string) error
 }

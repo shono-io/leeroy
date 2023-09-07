@@ -2,6 +2,8 @@ module github.com/shono-io/leeroy
 
 go 1.21
 
+replace github.com/benthosdev/benthos/v4 => github.com/calmera/benthos/v4 v4.0.0-20230904091257-dea725961590
+
 require (
 	github.com/arangodb/go-driver v1.6.0
 	github.com/benthosdev/benthos/v4 v4.20.0
@@ -36,10 +38,12 @@ require (
 	github.com/bufbuild/protocompile v0.4.0 // indirect
 	github.com/bwmarrin/snowflake v0.3.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
+	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/clbanning/mxj/v2 v2.7.0 // indirect
 	github.com/cockroachdb/apd/v3 v3.2.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/eapache/go-resiliency v1.3.0 // indirect
 	github.com/eapache/go-xerial-snappy v0.0.0-20230111030713-bf00bc1b83b6 // indirect
 	github.com/eapache/queue v1.1.0 // indirect
@@ -103,6 +107,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/quipo/dependencysolver v0.0.0-20170801134659-2b009cb4ddcc // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20201227073835-cf1acfcdf475 // indirect
+	github.com/redis/go-redis/v9 v9.1.0 // indirect
 	github.com/rickb777/date v1.20.2 // indirect
 	github.com/rickb777/plural v1.4.1 // indirect
 	github.com/rivo/uniseg v0.4.4 // indirect
@@ -144,5 +149,4 @@ require (
 	google.golang.org/protobuf v1.31.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	zvelo.io/ttlru v1.0.10 // indirect
 )

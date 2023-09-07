@@ -36,12 +36,13 @@ func newCache(conf *service.ParsedConfig, mgr *service.Resources) (service.Cache
 		return nil, fmt.Errorf("failed to parse index: %w", err)
 	}
 
-	return &cache{cl: cl, index: idx}, nil
+	return &cache{cl: cl, index: idx, logger: mgr.Logger()}, nil
 }
 
 type cache struct {
-	cl    *elasticsearch.TypedClient
-	index string
+	cl     *elasticsearch.TypedClient
+	index  string
+	logger *service.Logger
 }
 
 func (c cache) Get(ctx context.Context, key string) ([]byte, error) {

@@ -12,7 +12,6 @@ import (
 	"github.com/elastic/go-elasticsearch/v8/typedapi/types/enums/optype"
 	"github.com/elastic/go-elasticsearch/v8/typedapi/types/enums/refresh"
 	"github.com/elastic/go-elasticsearch/v8/typedapi/types/enums/sortorder"
-	"io"
 )
 
 func IsElasticsearchConfigured(conf *service.ParsedConfig) bool {
@@ -25,7 +24,7 @@ func IsElasticsearchConfigured(conf *service.ParsedConfig) bool {
 	return hasAddresses || hasCloudId
 }
 
-func NewElasticsearchClientFromConfig(conf *service.ParsedConfig) (Client, error) {
+func NewElasticsearchClientFromConfig(conf *service.ParsedConfig, mgr *service.Resources) (Client, error) {
 	cfg, err := clientConfigFromConfig(conf)
 	if err != nil {
 		return nil, err
@@ -36,7 +35,7 @@ func NewElasticsearchClientFromConfig(conf *service.ParsedConfig) (Client, error
 		return nil, fmt.Errorf("unable to create the elasticsearch client: %w", err)
 	}
 
-	return &ElasticsearchClient{cl: cl}, nil
+	return &ElasticsearchClient{cl: cl, logger: mgr.Logger()}, nil
 }
 
 func ElasticsearchConfigFields() []*service.ConfigField {
@@ -110,10 +109,37 @@ func clientConfigFromConfig(conf *service.ParsedConfig) (*elasticsearch.Config, 
 }
 
 type ElasticsearchClient struct {
-	cl *elasticsearch.TypedClient
+	cl     *elasticsearch.TypedClient
+	logger *service.Logger
 }
 
-func (c *ElasticsearchClient) List(ctx context.Context, collection string, q string, paging *PagingOpts) (Cursor, error) {
+func (c *ElasticsearchClient) ParseQuery(config string) (any, error) {
+	var subQry types.Query
+	if err := json.Unmarshal([]byte(config), &subQry); err != nil {
+		return nil, fmt.Errorf("failed to parse query: %w", err)
+	}
+
+	result := types.NewQuery()
+	result.ConstantScore = &types.ConstantScoreQuery{
+		Filter: &subQry,
+	}
+
+	return result, nil
+}
+
+func (c *ElasticsearchClient) List(ctx context.Context, collection string, q any, paging *PagingOpts) (Cursor, error) {
+	if q == nil {
+		return nil, fmt.Errorf("query is nil")
+	}
+
+	var qry *types.Query
+	switch qt := q.(type) {
+	case *types.Query:
+		qry = qt
+	default:
+		return nil, fmt.Errorf("query is not a valid elasticsearch query")
+	}
+
 	resp, err := c.cl.OpenPointInTime(collection).KeepAlive("1m").Do(ctx)
 	if err != nil {
 		return nil, err
@@ -124,19 +150,15 @@ func (c *ElasticsearchClient) List(ctx context.Context, collection string, q str
 		KeepAlive: "1m",
 	}
 
-	qry := types.NewQuery()
-	qry.QueryString = &types.QueryStringQuery{Query: q}
-
 	sort := types.NewSortOptions()
 	sort.Doc_ = &types.ScoreSort{Order: &sortorder.Asc}
 
-	req := c.cl.Search().Query(qry).Pit(pit).Sort(sort).Size(100)
-	r, _ := req.HttpRequest(ctx)
-	if r != nil {
-		defer r.Body.Close()
-		b, _ := io.ReadAll(r.Body)
-		fmt.Println(string(b))
+	if c.logger != nil {
+		b, _ := json.Marshal(qry)
+		c.logger.Debugf("executing %s", string(b))
 	}
+
+	req := c.cl.Search().Query(qry).Pit(pit).Sort(sort).Size(100)
 
 	return newEsCursor(ctx, c.cl, req, pit)
 }
@@ -305,15 +327,7 @@ func (c *elasticsearchCursor) Close() error {
 }
 
 func (c *elasticsearchCursor) loadMore() error {
-	fmt.Println("loading more results from elasticsearch")
-
 	req := c.req.SearchAfter(c.lastSort...)
-	r, _ := req.HttpRequest(c.ctx)
-	if r != nil {
-		defer r.Body.Close()
-		b, _ := io.ReadAll(r.Body)
-		fmt.Println(string(b))
-	}
 
 	resp, err := req.Do(c.ctx)
 	if err != nil {

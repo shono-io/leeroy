@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	_ "github.com/benthosdev/benthos/v4/public/components/confluent"
 	_ "github.com/benthosdev/benthos/v4/public/components/elasticsearch"
 	_ "github.com/benthosdev/benthos/v4/public/components/io"
 	_ "github.com/benthosdev/benthos/v4/public/components/kafka"
 	_ "github.com/benthosdev/benthos/v4/public/components/pure"
 	_ "github.com/benthosdev/benthos/v4/public/components/pure/extended"
+	_ "github.com/benthosdev/benthos/v4/public/components/redis"
 	"github.com/benthosdev/benthos/v4/public/service"
 	_ "github.com/shono-io/leeroy/components/elasticsearch"
 	_ "github.com/shono-io/leeroy/components/event"
