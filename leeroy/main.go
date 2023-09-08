@@ -10,13 +10,13 @@ import (
 	_ "github.com/benthosdev/benthos/v4/public/components/pure/extended"
 	_ "github.com/benthosdev/benthos/v4/public/components/redis"
 	"github.com/benthosdev/benthos/v4/public/service"
-	_ "github.com/shono-io/leeroy/components/elasticsearch"
-	_ "github.com/shono-io/leeroy/components/event"
-	_ "github.com/shono-io/leeroy/components/fork"
-	_ "github.com/shono-io/leeroy/components/gdrive/sheets"
-	_ "github.com/shono-io/leeroy/components/publish_kafka"
-	_ "github.com/shono-io/leeroy/components/reactor"
-	_ "github.com/shono-io/leeroy/components/storage"
+	_ "github.com/shono-io/leeroy/leeroy/components/elasticsearch"
+	_ "github.com/shono-io/leeroy/leeroy/components/event"
+	_ "github.com/shono-io/leeroy/leeroy/components/fork"
+	_ "github.com/shono-io/leeroy/leeroy/components/gdrive/sheets"
+	_ "github.com/shono-io/leeroy/leeroy/components/publish_kafka"
+	_ "github.com/shono-io/leeroy/leeroy/components/reactor"
+	_ "github.com/shono-io/leeroy/leeroy/components/storage"
 )
 
 func main() {

@@ -1,4 +1,7 @@
+# Leeroy
 
+Leeroy is an extension of Benthos that adds a few features that are useful for when building event-driven 
+pipelines with Shono.
 
 ## Building
 ### Prepare buildx

@@ -4,36 +4,32 @@ ENV CGO_ENABLED=0
 ENV GOOS=linux
 RUN useradd -u 10001 leeroy
 
-WORKDIR /go/src/github.com/shono-io/leeroy
+WORKDIR /go/src/github.com/shono-io/leeroy/
 # Update dependencies: On unchanged dependencies, cached layer will be reused
-COPY . /go/src/github.com/shono-io/leeroy
-RUN rm -rf /go/src/github.com/shono-io/leeroy/go.sum
-RUN go mod tidy
+COPY go.* /go/src/github.com/shono-io/leeroy/
 RUN go mod download
 
 # Build
-RUN go build -tags "timetzdata" -ldflags "-w -s" -o leeroy
+COPY ../.. /go/src/github.com/shono-io/leeroy/
+# Tag timetzdata required for busybox base image:
+# https://github.com/benthosdev/benthos/issues/897
+RUN make TAGS="timetzdata"
 
 # Pack
 FROM busybox AS package
 
 LABEL maintainer="Daan Gerits <daan@shono.io>"
 
-ENV stage local
-ENV config_name app.yaml
-
 WORKDIR /
 
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=build /etc/passwd /etc/passwd
-COPY --from=build /go/src/github.com/shono-io/leeroy/leeroy .
+COPY --from=build /go/src/github.com/shono-io/leeroy/target/bin/leeroy .
 
-RUN mkdir /config
-
-USER leeroy
+USER benthos
 
 EXPOSE 4195
 
 ENTRYPOINT ["/leeroy"]
 
-CMD ["-c", "benthos.yaml"]
+CMD ["-c", "/benthos.yaml"]
