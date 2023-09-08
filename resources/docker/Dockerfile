@@ -26,7 +26,7 @@ COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=build /etc/passwd /etc/passwd
 COPY --from=build /go/src/github.com/shono-io/leeroy/target/bin/leeroy .
 
-USER benthos
+USER leeroy
 
 EXPOSE 4195
 
