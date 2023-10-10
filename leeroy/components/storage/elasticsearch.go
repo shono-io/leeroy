@@ -118,13 +118,7 @@ func (c *ElasticsearchClient) ParseQuery(config string) (any, error) {
 	if err := json.Unmarshal([]byte(config), &subQry); err != nil {
 		return nil, fmt.Errorf("failed to parse query: %w", err)
 	}
-
-	result := types.NewQuery()
-	result.ConstantScore = &types.ConstantScoreQuery{
-		Filter: &subQry,
-	}
-
-	return result, nil
+	return &subQry, nil
 }
 
 func (c *ElasticsearchClient) List(ctx context.Context, collection string, q any, paging *PagingOpts) (Cursor, error) {
@@ -151,14 +145,14 @@ func (c *ElasticsearchClient) List(ctx context.Context, collection string, q any
 	}
 
 	sort := types.NewSortOptions()
-	sort.Doc_ = &types.ScoreSort{Order: &sortorder.Asc}
+	sort.Doc_ = &types.ScoreSort{Order: &sortorder.Desc}
 
 	if c.logger != nil {
 		b, _ := json.Marshal(qry)
 		c.logger.Debugf("executing %s", string(b))
 	}
 
-	req := c.cl.Search().Query(qry).Pit(pit).Sort(sort).Size(100)
+	req := c.cl.Search().Query(qry).Pit(pit).Sort(sort).Size(100).TrackScores(true)
 
 	return newEsCursor(ctx, c.cl, req, pit)
 }
@@ -308,6 +302,8 @@ func (c *elasticsearchCursor) Read() (map[string]any, error) {
 	if err := json.Unmarshal(hit.Source_, &result); err != nil {
 		return nil, err
 	}
+
+	result["_score"] = float64(hit.Score_)
 
 	c.lastSort = hit.Sort
 	c.pageOffset++
