@@ -69,7 +69,7 @@ func (c *PubSubClientWrapper) GetTopic(topicName string, timeout time.Duration) 
 	defer cancelFn()
 
 	resp, err := c.pubSubClient.GetTopic(ctx, req, grpc.Trailer(&trailer))
-	//printTrailer(trailer)
+	printTrailer(trailer)
 
 	if err != nil {
 		return nil, err
@@ -107,7 +107,7 @@ func (c *PubSubClientWrapper) Publish(topicName string, schema *SchemaInfo, data
 	defer cancelFn()
 
 	pubResp, err := c.pubSubClient.Publish(ctx, req, grpc.Trailer(&trailer))
-	//printTrailer(trailer)
+	printTrailer(trailer)
 
 	if err != nil {
 		return err
@@ -156,17 +156,24 @@ func NewGRPCClient(grpcEndpoint string, cfg LoginConfig, timeout time.Duration, 
 		return nil, err
 	}
 
-	resp, err := Login(cfg, timeout)
+	auth, err := Login(cfg, timeout)
 	if err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("unable to authenticate: %w", err)
 	}
 
+	ui, err := UserInfo(cfg.Endpoint, auth.AccessToken, timeout)
+	if err != nil {
+		return nil, fmt.Errorf("unable to retrieve user info: %w", err)
+	}
+
 	result := &PubSubClientWrapper{
 		conn:         conn,
 		pubSubClient: NewPubSubClient(conn),
-		accessToken:  resp.AccessToken,
-		instanceURL:  resp.InstanceURL,
+		accessToken:  auth.AccessToken,
+		instanceURL:  auth.InstanceURL,
+		userID:       ui.UserID,
+		orgID:        ui.OrganizationID,
 		oauthURL:     cfg.Endpoint,
 		logger:       logger,
 	}
@@ -200,10 +207,7 @@ func printTrailer(trailer metadata.MD) {
 }
 
 func (c *PubSubClientWrapper) Subscribe(topic string, batchSize int32, preset ReplayPreset) (*Subscription, error) {
-	ctx, cancelFn := context.WithCancel(c.getAuthContext())
-	defer cancelFn()
-
-	subscribeClient, err := c.pubSubClient.Subscribe(ctx)
+	subscribeClient, err := c.pubSubClient.Subscribe(c.getAuthContext())
 	if err != nil {
 		return nil, err
 	}
@@ -254,6 +258,10 @@ func (sub *Subscription) ReadBatch() (service.MessageBatch, error) {
 		ReplayId:     sub.replayId.Get(),
 		ReplayPreset: sub.replayPreset,
 	}
+	if sub.replayPreset == ReplayPreset_CUSTOM && sub.replayId.Get() != nil {
+		fetchRequest.ReplayId = sub.replayId.Get()
+	}
+
 	if err := sub.sc.Send(fetchRequest); err != nil {
 		if err == io.EOF {
 			sub.logger.Debugf("No new events to fetch\n")

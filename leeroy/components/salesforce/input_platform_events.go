@@ -145,17 +145,13 @@ func (i *input) Connect(ctx context.Context) error {
 
 	i.client = client
 
-	err = client.FetchUserInfo(i.timout)
-	if err != nil {
-		client.Close()
-		return fmt.Errorf("could not fetch user info: %v", err)
-	}
-
 	topic, err := client.GetTopic(i.topic, i.timout)
 	if err != nil {
 		client.Close()
 		return fmt.Errorf("could not fetch topic: %v", err)
 	}
+
+	i.logger.Warnf("topic: %v", topic)
 
 	if !topic.GetCanSubscribe() {
 		client.Close()
