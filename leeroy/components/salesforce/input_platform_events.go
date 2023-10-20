@@ -23,8 +23,9 @@ func config() *service.ConfigSpec {
 			service.NewStringField("client_id"),
 			service.NewStringField("client_secret"),
 		)).
+		Field(service.NewStringField("cache")).
 		Field(service.NewStringField("grpc_endpoint").Default("api.pubsub.salesforce.com:7443")).
-		Field(service.NewIntField("batchSize").Default(50)).
+		Field(service.NewIntField("batchSize").Default(5)).
 		Field(service.NewDurationField("timeout").Default("5s")).
 		Field(service.NewStringField("replay_preset").Default("earliest"))
 }
@@ -85,6 +86,15 @@ func newInput(conf *service.ParsedConfig, mgr *service.Resources) (service.Batch
 		return nil, err
 	}
 
+	cacheName, err := conf.FieldString("cache")
+	if err != nil {
+		return nil, err
+	}
+
+	if !mgr.HasCache(cacheName) {
+		return nil, fmt.Errorf("cache '%s' is not defined", cacheName)
+	}
+
 	return &input{
 		grpcEndpoint: grpcEndpoint,
 		topic:        topic,
@@ -92,10 +102,12 @@ func newInput(conf *service.ParsedConfig, mgr *service.Resources) (service.Batch
 		authEndpoint: authEndpoint,
 		clientId:     authClientId,
 		clientSecret: authClientSecret,
+		cacheName:    cacheName,
 		username:     authUsername,
 		password:     authPassword,
 		timout:       timeout,
 		replayPreset: replayPreset,
+		mgr:          mgr,
 
 		logger: mgr.Logger(),
 	}, nil
@@ -124,7 +136,10 @@ type input struct {
 	timout       time.Duration
 	replayPreset ReplayPreset
 
+	cacheName string
+
 	logger *service.Logger
+	mgr    *service.Resources
 
 	client *PubSubClientWrapper
 	sub    *Subscription
@@ -158,7 +173,7 @@ func (i *input) Connect(ctx context.Context) error {
 		return fmt.Errorf("this user is not allowed to subscribe to the following topic: %s", i.topic)
 	}
 
-	sub, err := client.Subscribe(i.topic, i.batchSize, i.replayPreset)
+	sub, err := client.Subscribe(i.topic, i.batchSize, i.replayPreset, &CacheReplayState{mgr: i.mgr, cacheName: i.cacheName, key: i.topic})
 	if err != nil {
 		client.Close()
 		return fmt.Errorf("could not subscribe to topic: %v", err)
@@ -170,9 +185,13 @@ func (i *input) Connect(ctx context.Context) error {
 
 func (i *input) ReadBatch(ctx context.Context) (service.MessageBatch, service.AckFunc, error) {
 	// -- read the batch from the subscription
-	result, err := i.sub.ReadBatch()
+	result, err := i.sub.ReadBatch(ctx)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	if result == nil {
+		return nil, func(ctx context.Context, err error) error { return nil }, nil
 	}
 
 	return result, func(ctx context.Context, err error) error {

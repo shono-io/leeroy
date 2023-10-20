@@ -206,7 +206,7 @@ func printTrailer(trailer metadata.MD) {
 	log.Printf("end of trailers")
 }
 
-func (c *PubSubClientWrapper) Subscribe(topic string, batchSize int32, preset ReplayPreset) (*Subscription, error) {
+func (c *PubSubClientWrapper) Subscribe(topic string, batchSize int32, preset ReplayPreset, replayState ReplayState) (*Subscription, error) {
 	subscribeClient, err := c.pubSubClient.Subscribe(c.getAuthContext())
 	if err != nil {
 		return nil, err
@@ -219,7 +219,7 @@ func (c *PubSubClientWrapper) Subscribe(topic string, batchSize int32, preset Re
 		topic:        topic,
 		batchSize:    batchSize,
 		replayPreset: preset,
-		replayId:     &MemoryReplayState{},
+		replayId:     replayState,
 	}, nil
 }
 
@@ -236,36 +236,45 @@ type Subscription struct {
 	unconfirmedReplayId []byte
 }
 
-func (sub *Subscription) CurrentReplayId() []byte {
-	return sub.replayId.Get()
+func (sub *Subscription) CurrentReplayId() ([]byte, error) {
+	return sub.replayId.Get(sub.sc.Context())
 }
 
 func (sub *Subscription) IsBatchPending() bool {
 	return sub.unconfirmedReplayId != nil
 }
 
-func (sub *Subscription) ReadBatch() (service.MessageBatch, error) {
+func (sub *Subscription) ReadBatch(ctx context.Context) (service.MessageBatch, error) {
 	if sub.IsBatchPending() {
-		return nil, fmt.Errorf("cannot read a new batch until the previous batch has been confirmed")
+		// cannot read a new batch until the previous batch has been confirmed
+		return nil, nil
 	}
 
 	result := service.MessageBatch{}
+
+	// -- get the replay id
+	replayId, err := sub.replayId.Get(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	replayPreset := sub.replayPreset
+	if replayId != nil && len(replayId) != 0 {
+		replayPreset = ReplayPreset_CUSTOM
+	}
 
 	// send a request to the server to fetch events
 	fetchRequest := &FetchRequest{
 		TopicName:    sub.topic,
 		NumRequested: sub.batchSize,
-		ReplayId:     sub.replayId.Get(),
-		ReplayPreset: sub.replayPreset,
-	}
-	if sub.replayPreset == ReplayPreset_CUSTOM && sub.replayId.Get() != nil {
-		fetchRequest.ReplayId = sub.replayId.Get()
+		ReplayId:     replayId,
+		ReplayPreset: replayPreset,
 	}
 
 	if err := sub.sc.Send(fetchRequest); err != nil {
 		if err == io.EOF {
 			sub.logger.Debugf("No new events to fetch\n")
-			//return nil, nil
+			return nil, nil
 		}
 
 		return nil, err
@@ -319,7 +328,7 @@ func (sub *Subscription) Commit() error {
 		return nil
 	}
 
-	if err := sub.replayId.Set(sub.unconfirmedReplayId); err != nil {
+	if err := sub.replayId.Set(context.Background(), sub.unconfirmedReplayId); err != nil {
 		return fmt.Errorf("unable to store the replay id: %w", err)
 	}
 
