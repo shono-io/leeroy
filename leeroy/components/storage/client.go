@@ -4,7 +4,7 @@ import "context"
 
 type Client interface {
 	ParseQuery(config string) (any, error)
-	List(ctx context.Context, collection string, q any, paging *PagingOpts) (Cursor, error)
+	List(ctx context.Context, collection string, q any, pitEnabled bool, paging *PagingOpts) (Cursor, error)
 	Get(ctx context.Context, collection string, key string) (map[string]any, error)
 	Set(ctx context.Context, collection string, key string, value map[string]any) error
 	Merge(ctx context.Context, collection string, key string, value map[string]any) (map[string]any, error)

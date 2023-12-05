@@ -121,40 +121,47 @@ func (c *ElasticsearchClient) ParseQuery(config string) (any, error) {
 	return &subQry, nil
 }
 
-func (c *ElasticsearchClient) List(ctx context.Context, collection string, q any, paging *PagingOpts) (Cursor, error) {
+func (c *ElasticsearchClient) List(ctx context.Context, collection string, q any, pitEnabled bool, paging *PagingOpts) (Cursor, error) {
 	if q == nil {
 		return nil, fmt.Errorf("query is nil")
 	}
 
-	var qry *types.Query
-	switch qt := q.(type) {
-	case *types.Query:
-		qry = qt
-	default:
-		return nil, fmt.Errorf("query is not a valid elasticsearch query")
+	if pitEnabled {
+		qry, ok := q.(*types.Query)
+		if !ok {
+			return nil, fmt.Errorf("query is not a valid elasticsearch query; a pit query requires only the query part of a full search message")
+		}
+
+		resp, err := c.cl.OpenPointInTime(collection).KeepAlive("1m").Do(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		pit := &types.PointInTimeReference{
+			Id:        resp.Id,
+			KeepAlive: "1m",
+		}
+
+		sort := types.NewSortOptions()
+		sort.Doc_ = &types.ScoreSort{Order: &sortorder.Desc}
+
+		if c.logger != nil {
+			b, _ := json.Marshal(qry)
+			c.logger.Debugf("executing %s", string(b))
+		}
+
+		req := c.cl.Search().Query(qry).Pit(pit).Sort(sort).Size(100).TrackScores(true)
+
+		return newEsCursor(ctx, c.cl, req, pit)
+	} else {
+		qry, ok := q.(string)
+		if !ok {
+			return nil, fmt.Errorf("a full search message is required when pits are disabled")
+		}
+
+		req := c.cl.Search().Raw(bytes.NewReader([]byte(qry)))
+		return newEsCursor(ctx, c.cl, req, nil)
 	}
-
-	resp, err := c.cl.OpenPointInTime(collection).KeepAlive("1m").Do(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	pit := &types.PointInTimeReference{
-		Id:        resp.Id,
-		KeepAlive: "1m",
-	}
-
-	sort := types.NewSortOptions()
-	sort.Doc_ = &types.ScoreSort{Order: &sortorder.Desc}
-
-	if c.logger != nil {
-		b, _ := json.Marshal(qry)
-		c.logger.Debugf("executing %s", string(b))
-	}
-
-	req := c.cl.Search().Query(qry).Pit(pit).Sort(sort).Size(100).TrackScores(true)
-
-	return newEsCursor(ctx, c.cl, req, pit)
 }
 
 func (c *ElasticsearchClient) Get(ctx context.Context, collection string, key string) (map[string]any, error) {
@@ -257,26 +264,59 @@ func (c *ElasticsearchClient) Close() error {
 	return nil
 }
 
-func newEsCursor(ctx context.Context, cl *elasticsearch.TypedClient, req *search.Search, pit *types.PointInTimeReference) (*elasticsearchCursor, error) {
-	c := &elasticsearchCursor{
-		ctx:        ctx,
-		cl:         cl,
-		req:        req,
-		pit:        pit,
-		pageOffset: 0,
-	}
-
+func newEsCursor(ctx context.Context, cl *elasticsearch.TypedClient, req *search.Search, pit *types.PointInTimeReference) (Cursor, error) {
 	searchResp, err := req.Do(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	c.hits = searchResp.Hits.Hits
-
-	return c, nil
+	if pit == nil {
+		return &singlePageEsCursor{
+			ctx:        ctx,
+			pageOffset: 0,
+			hits:       searchResp.Hits.Hits,
+		}, nil
+	} else {
+		return &pagingEsCursor{
+			ctx:        ctx,
+			cl:         cl,
+			req:        req,
+			pit:        pit,
+			pageOffset: 0,
+			hits:       searchResp.Hits.Hits,
+		}, nil
+	}
 }
 
-type elasticsearchCursor struct {
+type singlePageEsCursor struct {
+	ctx        context.Context
+	pageOffset int
+	hits       []types.Hit
+}
+
+func (s *singlePageEsCursor) HasNext() bool {
+	return s.pageOffset < len(s.hits)
+}
+
+func (s *singlePageEsCursor) Read() (map[string]any, error) {
+	hit := s.hits[s.pageOffset]
+
+	var result map[string]any
+	if err := json.Unmarshal(hit.Source_, &result); err != nil {
+		return nil, err
+	}
+
+	result["_score"] = float64(hit.Score_)
+	s.pageOffset++
+
+	return result, nil
+}
+
+func (s *singlePageEsCursor) Close() error {
+	return nil
+}
+
+type pagingEsCursor struct {
 	ctx context.Context
 	cl  *elasticsearch.TypedClient
 	pit *types.PointInTimeReference
@@ -291,11 +331,11 @@ type elasticsearchCursor struct {
 	lastSort []types.FieldValue
 }
 
-func (c *elasticsearchCursor) HasNext() bool {
+func (c *pagingEsCursor) HasNext() bool {
 	return len(c.hits) > 0
 }
 
-func (c *elasticsearchCursor) Read() (map[string]any, error) {
+func (c *pagingEsCursor) Read() (map[string]any, error) {
 	hit := c.hits[c.pageOffset]
 
 	var result map[string]any
@@ -317,12 +357,12 @@ func (c *elasticsearchCursor) Read() (map[string]any, error) {
 	return result, nil
 }
 
-func (c *elasticsearchCursor) Close() error {
+func (c *pagingEsCursor) Close() error {
 	_, err := c.cl.ClosePointInTime().Id(c.pit.Id).Do(c.ctx)
 	return err
 }
 
-func (c *elasticsearchCursor) loadMore() error {
+func (c *pagingEsCursor) loadMore() error {
 	req := c.req.SearchAfter(c.lastSort...)
 
 	resp, err := req.Do(c.ctx)

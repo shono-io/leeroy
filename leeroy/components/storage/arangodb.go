@@ -84,7 +84,7 @@ func (c ArangodbClient) Merge(ctx context.Context, collection string, key string
 	panic("not supported yet")
 }
 
-func (c ArangodbClient) List(ctx context.Context, collection string, q any, paging *PagingOpts) (Cursor, error) {
+func (c ArangodbClient) List(ctx context.Context, collection string, q any, pitEnabled bool, paging *PagingOpts) (Cursor, error) {
 	if q == nil {
 		return nil, fmt.Errorf("query is nil")
 	}

@@ -34,6 +34,9 @@ func storeProcConfig() *service.ConfigSpec {
 		Field(service.NewInterpolatedStringField("key").
 			Description("The key to use. This is only applicable for 'get', 'add', 'set', 'merge' and 'delete'").
 			Optional()).
+		Field(service.NewBoolField("enable_pit").
+			Description("Enable point in time queries").
+			Default(false)).
 		Field(service.NewInterpolatedStringField("q").
 			Description("The query to pass to the driver. This is only applicable for 'list'").
 			Optional())
@@ -62,6 +65,11 @@ func procFromConfig(conf *service.ParsedConfig, mgr *service.Resources) (proc *s
 		proc.driver = driver
 	} else {
 		return nil, fmt.Errorf("no driver specified")
+	}
+
+	proc.pit, err = conf.FieldBool("enable_pit")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get enable_pit flag: %w", err)
 	}
 
 	proc.operation, err = conf.FieldString("operation")
@@ -93,6 +101,7 @@ type storeProc struct {
 	operation string
 	key       *service.InterpolatedString
 	q         *service.InterpolatedString
+	pit       bool
 }
 
 func (s *storeProc) Process(ctx context.Context, message *service.Message) (service.MessageBatch, error) {
@@ -287,9 +296,14 @@ func (s *storeProc) processList(ctx context.Context, message *service.Message) (
 		return nil, fmt.Errorf("failed to parse query: %w", err)
 	}
 
-	qry, err := s.driver.ParseQuery(q)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse query: %w", err)
+	var qry any
+	if s.pit {
+		qry, err = s.driver.ParseQuery(q)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse query: %w", err)
+		}
+	} else {
+		qry = q
 	}
 
 	col, err := s.collection.TryString(message)
@@ -297,13 +311,13 @@ func (s *storeProc) processList(ctx context.Context, message *service.Message) (
 		return nil, fmt.Errorf("invalid collection: %w", err)
 	}
 
-	cur, err := s.driver.List(ctx, col, qry, nil)
+	cur, err := s.driver.List(ctx, col, qry, s.pit, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list documents: %w", err)
 	}
 	defer func() {
 		if err := cur.Close(); err != nil {
-			logrus.Warn("unable to close PIT: %w", err)
+			logrus.Warn("error closing cursor: %w", err)
 		}
 	}()
 
