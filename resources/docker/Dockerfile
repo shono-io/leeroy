@@ -16,11 +16,16 @@ COPY ../.. /go/src/github.com/shono-io/leeroy/
 RUN make TAGS="timetzdata"
 
 # Pack
-FROM busybox AS package
+FROM debian:bookworm-slim AS package
 
 LABEL maintainer="Daan Gerits <daan@shono.io>"
 
 WORKDIR /
+
+RUN apt update && \
+    apt install -y  curl miller unzip && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=build /etc/passwd /etc/passwd
